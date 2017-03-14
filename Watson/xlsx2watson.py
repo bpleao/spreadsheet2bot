@@ -14,10 +14,11 @@ import io
 import re
 import sys
 import pickle
+import itertools
 
 wb = open_workbook(u"../Dados para Chatbot do Livro dos Espíritos.xlsx")
 output_file = u"workspace-livro-dos-espiritos.json"
-reAllLettersAndSpace = "[A-Za-záàãâçéêíóôúü\s]"
+reAllLettersAndSpace = u"[A-Za-záàãâçéêíóôúü\s]"
 
 def eliminateNonAscii(word):
     d = {u"á":u"a",u"à":u"a",u"ã":u"a",u"â":u"a",u"ç":u"c",u"é":u"e",u"ê":u"e",u"í":u"i",u"ó":u"o",u"ô":u"o",u"ú":u"u",u"ü":u"u"}
@@ -40,6 +41,8 @@ jsonDict = {"intents":[],"name":"livro-dos-espiritos","language":"pt-br",
 s_entities = wb.sheet_by_name("Entidades")
 # entity_dict: name -> value -> synonym list
 entity_dict = defaultdict(lambda: defaultdict(list))
+# composite_conditions_dict: composite_entity_name -> list of conditions
+composite_conditions_dict = defaultdict(list)
 syn2entity_dict = dict()
 for row_idx in range(1,s_entities.nrows):
     row = s_entities.row(row_idx)
@@ -49,7 +52,7 @@ for row_idx in range(1,s_entities.nrows):
     value = row[1].value
     if value == "":
         continue
-    # synonyms accept non ascii. value needs also to be added as synonym
+    # value needs also to be added as synonym
     for cell in row[1:]:
         synonym = cell.value
         if synonym == "":
@@ -59,7 +62,19 @@ for row_idx in range(1,s_entities.nrows):
             if synonym in syn2entity_dict.keys():
                 sys.exit("Error: duplicate value %s found in synonym values. Stopping..."%synonym)
             syn2entity_dict.update({synonym:":".join([name,value])})
-
+    # if is a composite entity adds conditions to composite_conditions_dict
+    synStr = "".join(entity_dict[name][value])
+    isComposite = (synStr.find("@") >= 0)
+    if isComposite:
+        for term in entity_dict[name][value]:
+            # if non-composite synonym of composite entity
+            if term.find("@") == -1:
+                conditions = [u"composite"]
+            else:
+                conditions = sorted(term.replace("@","").split())
+            if conditions not in composite_conditions_dict[name]:
+                composite_conditions_dict[name].append(conditions)
+                    
 # prepare json structure for entities
 # an entity named "composite" is created to store non-composite synonyms of composite entities
 composite_jsonDict = {"description":None,"entity":"composite","source":None,"open_list":False,"values":[],"type":None}
@@ -119,40 +134,47 @@ for intent in intent_list:
       }
     })
 
-def build_example(q_marked):
+def build_example(q_marked,terms):
     text = q_marked
-    example_excerpts = []
-    example_parameters = []
-    for term, parameter in zip(terms,parameters):
-        term_idx = text.find(term)
-        if term_idx > 0:
-            example_excerpts.append(text[:term_idx])
-            example_parameters.append("")
-        example_excerpts.append(re.split("\s+@", term[1:-1])[0])
-        example_parameters.append(parameter)
-        text = text[(term_idx + len(term)):]
-    if len(text) > 0:
-        example_excerpts.append(text)
-        example_parameters.append("")
-    return zip(example_excerpts, example_parameters)
+    for term in terms:
+        term_text = term[1:-1]
+        term_text = re.split("\s+@", term_text)[0]
+        text = text.replace(term,term_text,1)
+    return text
+
+def build_conditions(entities, composite_entities):
+    conditions = [list(set(entities))]
+    for composite_entity in composite_entities:
+        composite_conditions = composite_conditions_dict[composite_entity]
+        conditions_tuples = list(itertools.product(conditions,composite_conditions))
+        # combine tuples, remove duplicates and return list
+        conditions = [list(set(list(t)[0]+list(t)[1])) for t in conditions_tuples]
+    return conditions
 
 def process_q_marked(q_marked):
-    terms = re.findall("\["+reAllLettersAndSpace+"+\s?@?\w*\]")
+    terms = re.findall("\["+reAllLettersAndSpace+"+\s?@?\w*\]",q_marked)
     entities = []
+    composite_entities = []
     for term in terms:
         term = term[1:-1] # eliminating [ and ]
         if term.find("@") > 0:
             term, entity = re.split("\s+@", term)
+            composite_entities.append(entity)
         else:
             if term not in syn2entity_dict.keys():
                 sys.exit("Error: synonym %s not found in synonym list (row %d). Stopping..."%(eliminateNonAscii(term), row_num))
             entity = syn2entity_dict[term]
-        entities.append(entity)
+            entities.append(entity)
     # using only the high level entities for the examples:
-    example = build_example(q_marked) 
-    conditions = build_conditions(entities)
+    example = build_example(q_marked,terms) 
+    conditions = build_conditions(entities, composite_entities)
     return (example, conditions)
 
+def remove_duplicate_lists(lists_list):
+    tuple_list = [tuple(l) for l in lists_list]
+    unique_tuple_list = list(set([tuple(item) for item in tuple_list]))
+    return [list(t) for t in unique_tuple_list]
+    
 # intent_example_dict: intent -> list of examples
 intent_example_dict = defaultdict(list)
 intent_nodes_dict = defaultdict(list)
@@ -176,11 +198,14 @@ for row_idx in range(1,s_qa.nrows):
             break
         example, conditions = process_q_marked(q_marked)
         intent_example_dict[intent].append(example)
-        conditions_list.append(conditions)
+        conditions_list.extend(conditions)
+    # removing duplicates
+    conditions_list = remove_duplicate_lists(conditions_list)
     intent_nodes_dict[intent].append((q_num, conditions_list, qa))
 
 print "%d Q&A rows processed successfully!"%row_idx
 
+#%% build json
 def build_example_json(example):
     j =[]
     for t in example:
