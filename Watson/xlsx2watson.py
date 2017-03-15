@@ -173,7 +173,7 @@ for row_idx in range(1,s_qa.nrows):
 
 print "%d Q&A rows processed successfully!"%row_idx
 
-#%% creating tree structures to sort questions
+#%% ordering conditions (separately for each intent)
 intentCondition2questions_dict = defaultdict(lambda: defaultdict(list))
 for intent in intent_nodes_dict:
     for num in intent_nodes_dict[intent]:
@@ -182,24 +182,10 @@ for intent in intent_nodes_dict:
         for condition in conditions:
             intentCondition2questions_dict[intent][tuple(condition)].append(num)
 
-
-# ordering conditions (separately for each intent)
-#def insert_ordered_conditions(conditions):  
-
+orderedConditions_dict = dict()
 for intent in intentCondition2questions_dict:
-    remaining_conditions = intentCondition2questions_dict[intent].keys()
-    ordered_conditions = []
-    while len(remaining_conditions) > 0:
-        len_list = [len(condition) for condition in remaining_conditions]
-        max_len = max(len_list)
-        root_idx = len_list.index(max_len) # takes the first from all largest
-        next_conditions = [remaining_conditions.pop(root_idx)]
-        while len(next_conditions) > 0:
-            ordered_conditions.extend(next_conditions)
-            for current_condition in next_conditions:
-                intersect_len_list = [set(current_condition).intersect(c) for c in remaining_conditions]
-                max_intersect = max(intersect_len_list)
-        
+    all_conditions = intentCondition2questions_dict[intent].keys()
+    orderedConditions_dict[intent] = sorted(all_conditions, key=lambda c: len(c), reverse=True)
         
 
 #%% build json
