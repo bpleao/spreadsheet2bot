@@ -45,19 +45,27 @@ entity_dict = defaultdict(lambda: defaultdict(list))
 composite_conditions_dict = defaultdict(list)
 syn2entity_dict = dict()
 for row_idx in range(1,s_entities.nrows):
+# Debug:
+#for row_idx in [1,10,23]:
     row = s_entities.row(row_idx)
     if row[0].value == "":
         break
     synList = [c.value for c in row[1:]]
     synStr = "".join(synList)
-    isComposite = (synStr.find("@") >= 0)
+    
+#    print(synStr)
+
+    isComposite = (synStr.find(u"@") >= 0)
     if isComposite:
         composite_name = row[0].value
-        nonCompositeSyns = [syn for syn in synList if syn.find(u"@") == -1]
+        nonCompositeSyns = [syn for syn in synList if (len(syn) > 0) and (syn.find(u"@") == -1)]
+
+#        print(nonCompositeSyns)
+
         if len(nonCompositeSyns) > 0:
             name = u"composite"
             value = nonCompositeSyns[0]
-            composite_conditions_dict[composite_name].append(":".join([name,value]))
+            composite_conditions_dict[composite_name].append([":".join([name,value])])
     else:
         name = row[0].value
         value = row[1].value
@@ -66,13 +74,13 @@ for row_idx in range(1,s_entities.nrows):
         synonym = cell.value
         if synonym == "":
             break
-        entity_dict[name][value].append(synonym)
-        if synonym.find("@") == -1:
+        if synonym.find(u"@") == -1:
             if synonym in syn2entity_dict.keys():
                 sys.exit("Error: duplicate value %s found in synonym values. Stopping..."%synonym)
             syn2entity_dict.update({synonym:":".join([name,value])})
+            entity_dict[name][value].append(synonym)
         else: # composite
-            conditions = sorted(synonym.replace("@","").split())
+            conditions = sorted(synonym.replace(u"@","").split())
             if conditions not in composite_conditions_dict[composite_name]:
                 composite_conditions_dict[composite_name].append(conditions)
             
@@ -88,33 +96,11 @@ for name in entity_dict:
 
 json.dump(jsonDict,open(output_file, "w"), indent=2)
 
-#%% generating intents and dialog_nodes json structures
+#%% generating intents structures
 
 dialog_nodes_list = []
 s_intents = wb.sheet_by_name(u"Intenções")
 intent_list = [cell.value for cell in s_intents.col(0)[1:]]
-# create dialog nodes corresponding to each intent
-for intent in intent_list:
-    dialog_nodes_list.append({
-      "description": None, 
-      "parent": None, 
-      "dialog_node": intent, 
-      "previous_sibling": None, 
-      "context": None, 
-      "output": {
-        "text": {
-          "values": [], 
-          "selection_policy": "sequential"
-        }
-      }, 
-      "metadata": None, 
-      "conditions": "#"+intent, 
-      "go_to": {
-        "dialog_node": "", 
-        "return": None, 
-        "selector": "condition"
-      }
-    })
 
 def build_example(q_marked,terms):
     text = q_marked
@@ -159,7 +145,7 @@ def remove_duplicate_lists(lists_list):
     
 # intent_example_dict: intent -> list of examples
 intent_example_dict = defaultdict(list)
-intent_nodes_dict = defaultdict(list)
+intent_nodes_dict = defaultdict(lambda: defaultdict())
 s_qa = wb.sheet_by_name("Perguntas e Respostas")
 for row_idx in range(1,s_qa.nrows):
     row_num = row_idx + 1
@@ -183,11 +169,65 @@ for row_idx in range(1,s_qa.nrows):
         conditions_list.extend(conditions)
     # removing duplicates
     conditions_list = remove_duplicate_lists(conditions_list)
-    intent_nodes_dict[intent].append((q_num, conditions_list, qa))
+    intent_nodes_dict[intent][q_num] = (conditions_list, qa)
 
 print "%d Q&A rows processed successfully!"%row_idx
 
+#%% creating tree structures to sort questions
+intentCondition2questions_dict = defaultdict(lambda: defaultdict(list))
+for intent in intent_nodes_dict:
+    for num in intent_nodes_dict[intent]:
+        q_data = list(intent_nodes_dict[intent][num])
+        conditions = q_data[0]
+        for condition in conditions:
+            intentCondition2questions_dict[intent][tuple(condition)].append(num)
+
+
+# ordering conditions (separately for each intent)
+#def insert_ordered_conditions(conditions):  
+
+for intent in intentCondition2questions_dict:
+    remaining_conditions = intentCondition2questions_dict[intent].keys()
+    ordered_conditions = []
+    while len(remaining_conditions) > 0:
+        len_list = [len(condition) for condition in remaining_conditions]
+        max_len = max(len_list)
+        root_idx = len_list.index(max_len) # takes the first from all largest
+        next_conditions = [remaining_conditions.pop(root_idx)]
+        while len(next_conditions) > 0:
+            ordered_conditions.extend(next_conditions)
+            for current_condition in next_conditions:
+                intersect_len_list = [set(current_condition).intersect(c) for c in remaining_conditions]
+                max_intersect = max(intersect_len_list)
+        
+        
+
 #%% build json
+# create dialog nodes corresponding to each intent
+previous_sibling = None
+for intent in intent_list:
+    dialog_nodes_list.append({
+      "description": None, 
+      "parent": None, 
+      "dialog_node": intent, 
+      "previous_sibling": previous_sibling, 
+      "context": None, 
+      "output": {
+        "text": {
+          "values": [], 
+          "selection_policy": "sequential"
+        }
+      }, 
+      "metadata": None, 
+      "conditions": "#"+intent, 
+      "go_to": {
+        "dialog_node": "", 
+        "return": None, 
+        "selector": "condition"
+      }
+    })
+    previous_sibling = intent
+
 def build_example_json(example):
     j =[]
     for t in example:
