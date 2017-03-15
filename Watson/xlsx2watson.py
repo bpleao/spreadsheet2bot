@@ -46,12 +46,21 @@ composite_conditions_dict = defaultdict(list)
 syn2entity_dict = dict()
 for row_idx in range(1,s_entities.nrows):
     row = s_entities.row(row_idx)
-    name = row[0].value
-    if name == "":
-        continue
-    value = row[1].value
-    if value == "":
-        continue
+    if row[0].value == "":
+        break
+    synList = [c.value for c in row[1:]]
+    synStr = "".join(synList)
+    isComposite = (synStr.find("@") >= 0)
+    if isComposite:
+        composite_name = row[0].value
+        nonCompositeSyns = [syn for syn in synList if syn.find(u"@") == -1]
+        if len(nonCompositeSyns) > 0:
+            name = u"composite"
+            value = nonCompositeSyns[0]
+            composite_conditions_dict[composite_name].append(":".join([name,value]))
+    else:
+        name = row[0].value
+        value = row[1].value
     # value needs also to be added as synonym
     for cell in row[1:]:
         synonym = cell.value
@@ -62,47 +71,20 @@ for row_idx in range(1,s_entities.nrows):
             if synonym in syn2entity_dict.keys():
                 sys.exit("Error: duplicate value %s found in synonym values. Stopping..."%synonym)
             syn2entity_dict.update({synonym:":".join([name,value])})
-    # if is a composite entity adds conditions to composite_conditions_dict
-    synStr = "".join(entity_dict[name][value])
-    isComposite = (synStr.find("@") >= 0)
-    if isComposite:
-        for term in entity_dict[name][value]:
-            # if non-composite synonym of composite entity
-            if term.find("@") == -1:
-                conditions = [u"composite"]
-            else:
-                conditions = sorted(term.replace("@","").split())
-            if conditions not in composite_conditions_dict[name]:
-                composite_conditions_dict[name].append(conditions)
-                    
+        else: # composite
+            conditions = sorted(synonym.replace("@","").split())
+            if conditions not in composite_conditions_dict[composite_name]:
+                composite_conditions_dict[composite_name].append(conditions)
+            
 # prepare json structure for entities
-# an entity named "composite" is created to store non-composite synonyms of composite entities
-composite_jsonDict = {"description":None,"entity":"composite","source":None,"open_list":False,"values":[],"type":None}
-compositeValues_list = composite_jsonDict["values"]
 for name in entity_dict:
-    nameDict = entity_dict[name]
-    valueList = nameDict.keys()
-    isComposite = False
-    if len(valueList) == 1:
-        value = valueList[0]
-        synStr = "".join(nameDict[value])
-        isComposite = (synStr.find(u"@") >= 0)
-    # composite values doesn't require any further entity creation, unless they
-    # have synonyms which are not composite
-    if isComposite:
-        nonCompositeSyns = [syn for syn in nameDict[value] if syn.find(u"@") == -1]
-        if len(nonCompositeSyns) > 0:
-            # if there are non-composite synonyms they are stored in entity named "composite"
-            compositeValues_list.append({"metadata":None,"value":nonCompositeSyns[0],"synonyms":nonCompositeSyns[1:]})
-        continue
     entity_jsonDict = {"description":None,"entity":name,"source":None,"open_list":False,"values":[],"type":None}
     entityValues_list = entity_jsonDict["values"]
+    nameDict = entity_dict[name]
     for value in nameDict:
         entityValue_dict = {"metadata":None,"value":value,"synonyms":nameDict[value]}
         entityValues_list.append(entityValue_dict)    
     jsonDict["entities"].append(entity_jsonDict)
-if len(compositeValues_list) > 0:    
-    jsonDict["entities"].append(composite_jsonDict)
 
 json.dump(jsonDict,open(output_file, "w"), indent=2)
 
@@ -171,8 +153,8 @@ def process_q_marked(q_marked):
     return (example, conditions)
 
 def remove_duplicate_lists(lists_list):
-    tuple_list = [tuple(l) for l in lists_list]
-    unique_tuple_list = list(set([tuple(item) for item in tuple_list]))
+    tuple_list = [tuple(sorted(l)) for l in lists_list]
+    unique_tuple_list = list(set(tuple_list))
     return [list(t) for t in unique_tuple_list]
     
 # intent_example_dict: intent -> list of examples
