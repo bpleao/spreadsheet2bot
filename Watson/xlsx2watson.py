@@ -174,29 +174,52 @@ for row_idx in range(1,s_qa.nrows):
 print "%d Q&A rows processed successfully!"%row_idx
 
 #%% ordering conditions (separately for each intent)
-intentCondition2questions_dict = defaultdict(lambda: defaultdict(list))
+condition2questions_dict = defaultdict(lambda: defaultdict(list))
 for intent in intent_nodes_dict:
     for num in intent_nodes_dict[intent]:
         q_data = list(intent_nodes_dict[intent][num])
         conditions = q_data[0]
         for condition in conditions:
-            intentCondition2questions_dict[intent][tuple(condition)].append(num)
+            condition2questions_dict[intent][tuple(condition)].append(num)
 
 orderedConditions_dict = dict()
-for intent in intentCondition2questions_dict:
-    all_conditions = intentCondition2questions_dict[intent].keys()
+for intent in condition2questions_dict:
+    all_conditions = condition2questions_dict[intent].keys()
     orderedConditions_dict[intent] = sorted(all_conditions, key=lambda c: len(c), reverse=True)
         
 
 #%% build json
 # create dialog nodes corresponding to each intent
-previous_sibling = None
+
+question_count = defaultdict(int)
+
+def build_examples_json(examples):
+    examples_json = []
+    for example in examples:
+        examples_json.append({"text":example})
+    return examples_json
+
+def build_node_name(question_list, increment_flag=True):
+    count_list = [Str(count) if count > 0  else ""]
+    
+previous_intent = None
+intents_json = []
 for intent in intent_list:
+    intents_json.append({
+      "description": null, 
+      "intent": intent, 
+      "examples": build_examples_json(intent_example_dict[intent])
+    })
+    
+    first_condition = orderedConditions_dict[intent][0]
+    question_list = condition2questions_dict[intent][first_condition]
+    first_node_name = build_node_name(question_list, False) 
+    
     dialog_nodes_list.append({
       "description": None, 
       "parent": None, 
       "dialog_node": intent, 
-      "previous_sibling": previous_sibling, 
+      "previous_sibling": previous_intent, 
       "context": None, 
       "output": {
         "text": {
@@ -212,17 +235,8 @@ for intent in intent_list:
         "selector": "condition"
       }
     })
-    previous_sibling = intent
+    previous_intent = intent
 
-def build_example_json(example):
-    j =[]
-    for t in example:
-        text,parameter = t
-        if parameter == "":
-            j.append({"text":text})
-        else:
-            j.append({"text":text,"alias":parameter,"meta":"@"+parameter,"userDefined":False})
-    return j
 
 for name in intent_example_dict:
     jsonDict = {"userSays":[], "name":name, "auto":True, "contexts":[], "responses":[], "priority":500000, "webhookUsed":True, "webhookForSlotFilling":False, "fallbackIntent":False, "events":[]}
