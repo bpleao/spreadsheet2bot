@@ -48,16 +48,17 @@ for row_idx in range(1,s_entities.nrows):
 # Debug:
 #for row_idx in [1,10,23]:
     row = s_entities.row(row_idx)
-    if row[0].value == "":
+    if row[0].value.lower() == "":
         break
-    synList = [c.value for c in row[1:]]
+    # setting all values to lower case since watson is case insensitive
+    synList = [c.value.lower() for c in row[1:]]
     synStr = "".join(synList)
     
 #    print(synStr)
 
     isComposite = (synStr.find(u"@") >= 0)
     if isComposite:
-        composite_name = row[0].value
+        composite_name = row[0].value.lower()
         nonCompositeSyns = [syn for syn in synList if (len(syn) > 0) and (syn.find(u"@") == -1)]
 
 #        print(nonCompositeSyns)
@@ -67,18 +68,19 @@ for row_idx in range(1,s_entities.nrows):
             value = nonCompositeSyns[0]
             composite_conditions_dict[composite_name].append([":".join([name,value])])
     else:
-        name = row[0].value
-        value = row[1].value
+        name = row[0].value.lower()
+        value = row[1].value.lower()
     # value needs also to be added as synonym
     for cell in row[1:]:
-        synonym = cell.value
+        synonym = cell.value.lower()
         if synonym == "":
             break
         if synonym.find(u"@") == -1:
             if synonym in syn2entity_dict.keys():
-                sys.exit("Error: duplicate value %s found in synonym values. Stopping..."%synonym)
-            syn2entity_dict.update({synonym:":".join([name,value])})
-            entity_dict[name][value].append(synonym)
+                print("Warning: duplicate value %s found in synonym values. Skipping..."%synonym)
+            else:
+                syn2entity_dict.update({synonym:":".join([name,value])})
+                entity_dict[name][value].append(synonym)
         else: # composite
             conditions = sorted(synonym.replace(u"@","").split())
             if conditions not in composite_conditions_dict[composite_name]:
@@ -98,9 +100,8 @@ json.dump(jsonDict,open(output_file, "w"), indent=2)
 
 #%% generating intents structures
 
-dialog_nodes_list = []
 s_intents = wb.sheet_by_name(u"Intenções")
-intent_list = [cell.value for cell in s_intents.col(0)[1:]]
+intent_list = [cell.value.lower() for cell in s_intents.col(0)[1:]]
 
 def build_example(q_marked,terms):
     text = q_marked
@@ -124,7 +125,7 @@ def process_q_marked(q_marked):
     entities = []
     composite_entities = []
     for term in terms:
-        term = term[1:-1] # eliminating [ and ]
+        term = term[1:-1].lower() # eliminating [ and ]
         if term.find("@") > 0:
             term, entity = re.split("\s+@", term)
             composite_entities.append(entity)
@@ -154,7 +155,7 @@ for row_idx in range(1,s_qa.nrows):
     q_num = re.findall("^(.+?). ", q)[0]
     a = row[1].value #TODO: eliminate numbers from answer
     qa = " ".join([q,a])
-    intent = row[2].value
+    intent = row[2].value.lower()
     if intent == "":
         break
     if intent not in intent_list:
@@ -199,23 +200,29 @@ def build_examples_json(examples):
         examples_json.append({"text":example})
     return examples_json
 
-def build_node_name(question_list, increment_flag=True):
-    count_list = [Str(count) if count > 0  else ""]
+def build_node_name(questions, increment_flag=True):
+    count_list = [str(question_count[q]) if question_count[q] > 0  else "" for q in questions]
+    if increment_flag:
+        for q in questions:
+            question_count[q] += 1
+    count_question_list = ["_".join(t) for t in zip(questions, count_list)]
+    return "Pergunta "+" ".join(count_question_list)
     
 previous_intent = None
 intents_json = []
+dialog_nodes_json = []
 for intent in intent_list:
     intents_json.append({
-      "description": null, 
+      "description": None, 
       "intent": intent, 
       "examples": build_examples_json(intent_example_dict[intent])
     })
     
     first_condition = orderedConditions_dict[intent][0]
-    question_list = condition2questions_dict[intent][first_condition]
-    first_node_name = build_node_name(question_list, False) 
+    questions = condition2questions_dict[intent][first_condition]
+    first_node_name = build_node_name(questions, False) 
     
-    dialog_nodes_list.append({
+    dialog_nodes_json.append({
       "description": None, 
       "parent": None, 
       "dialog_node": intent, 
@@ -230,38 +237,60 @@ for intent in intent_list:
       "metadata": None, 
       "conditions": "#"+intent, 
       "go_to": {
-        "dialog_node": "", 
+        "dialog_node": first_node_name, 
         "return": None, 
         "selector": "condition"
       }
     })
     previous_intent = intent
-
-
-for name in intent_example_dict:
-    jsonDict = {"userSays":[], "name":name, "auto":True, "contexts":[], "responses":[], "priority":500000, "webhookUsed":True, "webhookForSlotFilling":False, "fallbackIntent":False, "events":[]}
-    userSays = []
-    for example in intent_example_dict[name]:
-        userSays.append({"data":build_example_json(example),"isTemplate":False,"count":0})
-    jsonDict["userSays"] = userSays
-    responses = [{"resetContexts": False, "action":"getSpiritsBookResponse", "affectedContexts":[], "parameters":[], "messages": [
-        {
-          "type": 0,
-          "speech": "Algo deu errado. Por favor tente mais tarde..."
+    
+    previous_node_name = None
+    for condition in orderedConditions_dict[intent]:
+        questions = condition2questions_dict[intent][condition]
+        node_name = build_node_name(questions)
+        dialog_nodes_json.append({
+          "description": None, 
+          "parent": intent, 
+          "dialog_node": node_name, 
+          "previous_sibling": previous_node_name, 
+          "context": None, 
+          "output": {
+            "text": {
+              "values": [list(intent_nodes_dict[intent][q])[1] for q in questions], 
+              "selection_policy": "random"
+            }
+          }, 
+          "metadata": None, 
+          "conditions": " && ".join([u"@"+c for c in condition]), 
+          "go_to": None
+        })
+        previous_node_name = node_name
+    
+    # adding default action for intent
+    dialog_nodes_json.append({
+      "description": None, 
+      "parent": intent, 
+      "dialog_node": "True_"+intent, 
+      "previous_sibling": node_name, 
+      "context": None, 
+      "output": {
+        "text": {
+          "values": [
+            "N\u00e3o entendi. Por favor fa\u00e7a uma pergunta a respeito do conte\u00fado do Livro dos Esp\u00edritos."
+          ], 
+          "selection_policy": "sequential"
         }
-      ]}]
-    parameters = []
-    for parameter in intent_parameter_dict[name]:
-        isComposite = (parameter in composite_entity_list)
-        parameters.append({"dataType":"@"+parameter, "name":parameter, "value":"$"+parameter, "isList":(not isComposite)})
-    responses[0]["parameters"] = parameters
-    jsonDict["responses"] = responses
-    jsonData = json.dumps(jsonDict, ensure_ascii=False, indent=2)
-    # using io.open since it allows encoding
-    with io.open(intents_path+"/"+name+".json", "w", encoding="utf8") as f:
-        f.write(unicode(jsonData))      
+      }, 
+      "metadata": None, 
+      "conditions": "True", 
+      "go_to": None
+    })
 
+jsonDict["intents"] = intents_json
+jsonDict["dialog_nodes"] = dialog_nodes_json
 
+json.dump(jsonDict,open(output_file, "w"), indent=2)
 
+print "json file %s created successfully!"%output_file
 
 
