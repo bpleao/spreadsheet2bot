@@ -276,7 +276,7 @@ for intent in intent_list:
       "output": {
         "text": {
           "values": [
-            "Não entendi. Por favor faça uma pergunta a respeito do conteúdo do Livro dos Espíritos."
+            u"Não entendi. Por favor faça uma pergunta a respeito do conteúdo do Livro dos Espíritos."
           ], 
           "selection_policy": "sequential"
         }
