@@ -7,13 +7,10 @@ Created on Mon Feb 27 16:21:35 2017
 """
 
 from xlrd import open_workbook
-import os
 from collections import defaultdict
 import json
-import io
 import re
 import sys
-import pickle
 import itertools
 
 wb = open_workbook(u"../Dados para Chatbot do Livro dos Espíritos.xlsx")
