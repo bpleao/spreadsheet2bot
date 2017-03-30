@@ -21,7 +21,7 @@ def process_example(q_marked):
         text = text.replace(term,term_text,1)
     return text
 
-wb = load_workbook(filename)
+wb = load_workbook(filename, keep_vba = True)
 s_qa = wb.get_sheet_by_name("Perguntas e Respostas")
 example_dict = dict()
 qa_row_dict = dict()
@@ -46,30 +46,39 @@ conversation = ConversationV1(
     version='2017-02-03')
 
 workspace_id = '87d42987-eec9-4427-a63a-fc1e071b2f2b'
-
+examples_added_count = 0
 for row in s_form.rows:
     processed = (row[4].value is not None)
     if processed:
         continue
     q_num = "%d"%row[1].value
     text = row[2].value
+    print("\nNew example for question %s: %s"%(q_num,text))
     if text in example_dict[q_num]:
+        row[4].value = "Sim"
         continue
-#    response = conversation.message(workspace_id=workspace_id, message_input={
-#    'text': text})
-##    print(json.dumps(response, indent=2))
-##    print(response["output"]["text"][0])
-#    r_num = get_q_number(response)
-#    if r_num == q_num: # watson has correctly identified the question
-#        continue
+    response = conversation.message(workspace_id=workspace_id, message_input={
+    'text': text})
+    response_text = response["output"]["text"][0]
+    print("Response from Watson: %s"%response_text)
+#    print(json.dumps(response, indent=2))
+#    print(response["output"]["text"][0])
+    r_num = get_q_number(response_text)
+    if r_num == q_num: # watson has correctly identified the question
+        row[4].value = "Sim"
+        continue
     # inserting new example to spreadsheet
+    print("-> Adding example to spreadsheet")
     qa_row_num = qa_row_dict[q_num]
     qa_row = s_qa[qa_row_num]
     example_idx = len(example_dict[q_num]) + 3
     qa_row[example_idx].value = text
     example_dict[q_num].append(text)
     row[4].value = "Sim"
-    wb.save(filename)
+    examples_added_count += 1
+
+print("\nAdded %d examples to the spreadsheet."%examples_added_count)
+wb.save(filename)
 
         
         
