@@ -51,30 +51,39 @@ for row in s_form.rows:
     processed = (row[4].value is not None)
     if processed:
         continue
-    q_num = "%d"%row[1].value
+    q_num = row[1].value
+    if type(q_num) in (float,int):
+        q_num = "%d"%q_num
+    else:
+        q_num = q_num.lower().replace(" ","")
     text = row[2].value
     print("\nNew example for question %s: %s"%(q_num,text))
     if text in example_dict[q_num]:
-        row[4].value = "Sim"
+        print("Example is already in the spreadsheet.")
+        row[4].value = "Processado"
         continue
-    response = conversation.message(workspace_id=workspace_id, message_input={
-    'text': text})
-    response_text = response["output"]["text"][0]
-    print("Response from Watson: %s"%response_text)
-#    print(json.dumps(response, indent=2))
-#    print(response["output"]["text"][0])
-    r_num = get_q_number(response_text)
-    if r_num == q_num: # watson has correctly identified the question
-        row[4].value = "Sim"
-        continue
-    # inserting new example to spreadsheet
-    print("-> Adding example to spreadsheet")
+    example_count = len(example_dict[q_num])
+    if example_count == 0:
+        print("This question has not been evaluated yet.")
+    else:
+        response = conversation.message(workspace_id=workspace_id, message_input={
+        'text': text})
+        response_text = response["output"]["text"][0]
+        print("Response from Watson: %s"%response_text)
+    #    print(json.dumps(response, indent=2))
+    #    print(response["output"]["text"][0])
+        r_num = get_q_number(response_text)
+        if r_num == q_num: # watson has correctly identified the question
+            row[4].value = "Processado"
+            continue
+        # inserting new example to spreadsheet
+    print("-> Adding example to spreadsheet.")
     qa_row_num = qa_row_dict[q_num]
     qa_row = s_qa[qa_row_num]
     example_idx = len(example_dict[q_num]) + 3
     qa_row[example_idx].value = text
     example_dict[q_num].append(text)
-    row[4].value = "Sim"
+    row[4].value = "Processado"
     examples_added_count += 1
 
 print("\nAdded %d examples to the spreadsheet."%examples_added_count)
