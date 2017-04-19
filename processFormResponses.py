@@ -6,7 +6,7 @@ import re
 
 #%% reading existing examples
 reAllLettersAndSpace = u"[A-Za-záàãâçéêíóôúü\s]"
-filename = u"../Dados para Chatbot do Livro dos Espíritos.xlsx"
+filename = u"Dados para Chatbot do Livro dos Espíritos.xlsx"
 
 def get_q_number(q_text):
     return re.findall("^(.+?). ", q_text)[0]
